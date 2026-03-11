@@ -1,0 +1,16 @@
+#moe:ph4que 2024.06
+#pharmacophore 7 tag t value *
+scheme t Unified matchsize i 0 use_Hs i 1 abspos i 0 title t FKB1A!AT
+useRval i 0 comment s $
+#feature 7 expr tt color ix x r y r z r r r ebits ix gbits ix m ix
+Acc2 f2f20d -33.112931 39.4889126 30.1062932 1.4 0 400 a64cff Acc df2f2
+-32.0398568695171 40.2407219384456 32.5929937401509 1 0 400 a64cff Acc2
+df2f2 -35.2071465 44.1421978 32.2806722 1.4 0 400 a64cff Acc df2f2
+-35.5743211 41.3001615 32.0777324 1 0 400 a64cff Aro f2f20d -34.4671949
+34.6495504857843 30.1691827093137 1 0 400 a64cff PiN ff8000
+-34.2879366749114 34.2005314095716 28.1264109501178 1.4 0 400 a64cff Hyd
+df20d -38.2035552807018 38.8374822368421 31.8492428491228 1.5 0 400
+a64cff
+#constraint 3 expr tt ebits ix ids i*
+SAMEAIDX 0 2 1 2 SAMEAIDX 0 2 3 4 SAMEAIDX 0 2 5 6
+#endpharmacophore
