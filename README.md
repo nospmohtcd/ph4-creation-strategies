@@ -14,6 +14,7 @@ Pharmacophores are abstract representations of the essential steric and electron
 
 ```text
 .
+├── ph4/                    # Pharmacophore (ph4) models
 ├── prepped-complexes/      # Curated protein-ligand structures
 ├── scripts/                # Python utility and validation scripts
 │   ├── mcnemar.py          # Statistical significance testing
@@ -21,6 +22,12 @@ Pharmacophores are abstract representations of the essential steric and electron
 ├── SI/                     # Supplementary tables (S1.xlsx, S2.xlsx)
 └── README.md
 ```
+
+---
+
+## ⚛️ [Pharmacophore Models](./ph4/)
+
+For each target, both human- and machine-generated Ph4 models in `.ph4` format.
 
 ---
 
