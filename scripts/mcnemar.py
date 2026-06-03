@@ -9,37 +9,44 @@ chi-squared values to compare human-generated vs. machine-generated models.
 """
 
 import pandas as pd
+import numpy as np
 import argparse
 import os
 from itertools import combinations
 from statsmodels.stats.contingency_tables import mcnemar
+from statsmodels.stats.multitest import multipletests
 
-def determine_comparison_result(row, alpha=0.05):
-    """Determines the comparison result based on p-value and discordant counts."""
-    p_value = row['p-value']
-    m1_better = row['M1 Correct / M2 Wrong (YN)']
-    m2_better = row['M1 Wrong / M2 Correct (NY)']
-    model_1 = row['Model 1']
-    model_2 = row['Model 2']
+def determine_sig(row, p_col, alpha=0.05):
+    p_val = row[p_col]
+    if p_val >= alpha:
+        return f'Equivalent (p \u2265 {alpha})'
+    
+    m1, m2 = row['Model 1'], row['Model 2']
+    yn, ny = row['M1 Correct / M2 Wrong (YN)'], row['M1 Wrong / M2 Correct (NY)']
+    better = m1 if yn > ny else m2
+    return f'{better} is significantly better ({p_col})'
 
-    if p_value >= alpha:
-        return 'Equivalent (p \u2265 0.05)'
-    else:
-        # Statistically significant difference (p < 0.05)
-        if m1_better > m2_better:
-            return f'{model_1} is significantly better than {model_2} (YN > NY)'
-        elif m2_better > m1_better:
-            return f'{model_2} is significantly better than {model_1} (NY > YN)'
-        else:
-            # This edge case should be rare for p < 0.05
-            return 'Significant, but YN = NY'
+def get_or_ci(yn, ny):
+    """
+    Determines:
+	 the Odds Ratio: (yn/ny)
+	 the log standard error sqrt: (1/yn + 1/ny)
+	 X, Y: the lower and upper bounds of the 95% Confidence Interval for the Odds Ratio
+    """
+    # Modular addition for effect size
+    if ny == 0: return np.inf, np.nan, np.nan
+    if yn == 0: return 0.0, np.nan, np.nan
+    or_val = yn / ny
+    se_log = np.sqrt((1/yn) + (1/ny))
+    low_x = np.exp(np.log(or_val) - 1.96 * se_log)
+    upper_y = np.exp(np.log(or_val) + 1.96 * se_log)
+    return or_val, low_x, upper_y
 
 
 def run_mcnemar_analysis(input_file):
     """
     Performs McNemar's test for all unique pairs of models in the input CSV.
-    Generates two CSV files: a full results table with Comparison Result and a 
-    lower triangular p-value matrix.
+    Generates a CSV file: a full results table with Comparison Result(s)
     """
     
     # 1. Load the dataset
@@ -57,12 +64,12 @@ def run_mcnemar_analysis(input_file):
     # Ground Truth column (Column E / index 4)
     ground_truth_col = 'real_activity'
     
-    # Model columns (Columns F through O / indices 5 to 14)
-    model_cols = df.columns[5:15].tolist()
+    # Model columns (Columns F through N / indices 5 to 13)
+    model_cols = df.columns[5:14].tolist()
     
     # Basic check to ensure required columns exist
-    if ground_truth_col not in df.columns or len(model_cols) != 10:
-        print("Error: Input file must contain 'real_activity' and 10 model columns (indices 5-14).")
+    if ground_truth_col not in df.columns or len(model_cols) != 9:
+        print("Error: Input file must contain 'real_activity' and 9 model columns (indices 5-13).")
         return
     
     print(f"Starting McNemar analysis for {len(model_cols)} models: {', '.join(model_cols)}")
@@ -89,6 +96,7 @@ def run_mcnemar_analysis(input_file):
         
         # Perform McNemar's Test
         stats = mcnemar(table, exact=False, correction=True)
+        odds_ratio, low_x, upper_y = get_or_ci(yn, ny)
         
         results.append({
             'Model 1': m1,
@@ -99,7 +107,10 @@ def run_mcnemar_analysis(input_file):
             'Both Wrong (NN)': nn,
             'Total': total,
             'Chi-squared': stats.statistic,
-            'p-value': stats.pvalue
+            'p-value': stats.pvalue,
+	    'Odds Ratio': odds_ratio,
+	    'CI_Lower_X': low_x,
+	    'CI_Upper_Y': upper_y
         })
 
     # 4. Generate Output Filenames and Results DataFrame
@@ -110,35 +121,30 @@ def run_mcnemar_analysis(input_file):
 
     results_df = pd.DataFrame(results)
 
-    # 5. Add the Comparison Result Column**
-    results_df['Comparison Result'] = results_df.apply(determine_comparison_result, axis=1)
+    # 5. Multiple Testing Corrections
+    p_vals = results_df['p-value'].values
 
-    # --- FIRST OUTPUT: Full Results Table ---
+    # The [1] index retrieves the adjusted p-values array
+    results_df['p_Bonferroni'] = multipletests(p_vals, method='bonferroni')[1]
+    results_df['p_Holm'] = multipletests(p_vals, method='holm')[1]
+
+    # 6. Add the Comparison Result Column**
+    results_df['Result_Raw'] = results_df.apply(lambda r: determine_sig(r, 'p-value'), axis=1)
+    results_df['Result_Bonferroni'] = results_df.apply(lambda r: determine_sig(r, 'p_Bonferroni'), axis=1)
+    results_df['Result_Holm'] = results_df.apply(lambda r: determine_sig(r, 'p_Holm'), axis=1)
+
+    # 7. Manual checking of the Holm correction
+    results_df = results_df.sort_values('p-value')
+    # Add Rank and Multiplier
+    n = len(results_df)
+    results_df['Holm_Rank'] = range(1, n + 1)
+    results_df['Holm_Multiplier'] = n - results_df['Holm_Rank'] + 1
+    # Now you can sort back to Model 1 / Model 2 order for the CSV
+    results_df = results_df.sort_values(['Model 1', 'Model 2'])
+
+    # 8. --- OUTPUT: Full Results Table ---
     results_df.to_csv(output_full_results, index=False)
-    print(f"1/2: Full McNemar results (including Comparison Result) saved to: {output_full_results}")
-
-    # --- SECOND OUTPUT: Lower Triangular P-Value Matrix ---
-    
-    # Initialize an empty square matrix for p-values
-    p_matrix = pd.DataFrame(index=model_cols, columns=model_cols)
-
-    # Fill the lower triangular portion
-    for _, row in results_df.iterrows():
-        m1, m2 = row['Model 1'], row['Model 2']
-        p_val = row['p-value']
-        
-        # Get index positions to enforce lower triangular structure
-        idx1, idx2 = model_cols.index(m1), model_cols.index(m2)
-        
-        # Fill the cell where the row index > column index
-        if idx1 > idx2:
-            p_matrix.loc[m1, m2] = p_val
-        else:
-            p_matrix.loc[m2, m1] = p_val
-
-    p_matrix.to_csv(output_p_matrix)
-    print(f"2/2: Lower triangular p-value matrix saved to: {output_p_matrix}")
-
+    print(f"Full McNemar results (including Comparison Results) saved to: {output_full_results}")
 
 if __name__ == "__main__":
     # Setup command line argument parsing
